@@ -10,6 +10,7 @@ from groq import Groq
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
+from fpdf import FPDF
 
 # ── Config ────────────────────────────────────────────────────────────────────
 SBERT_MODEL   = "all-MiniLM-L6-v2"
@@ -302,7 +303,12 @@ st.divider()
 # MODE 1: Doc vs Doc  (TF-IDF first → SBERT optional)
 # ══════════════════════════════════════════════════════════════════════════════
 if mode == "📄 Doc vs Doc":
-    tab1, tab2, tab3 = st.tabs(["📄 Input", "📊 Analysis", "📋 Report"])
+    if "dvd_active_tab" not in st.session_state:
+        st.session_state["dvd_active_tab"] = "📄 Input"
+    tab1, tab2, tab3 = st.tabs(
+        ["📄 Input", "📊 Analysis", "📋 Report"],
+        default=st.session_state["dvd_active_tab"]
+        )
 
     with tab1:
         col1, col2 = st.columns(2)
@@ -311,8 +317,10 @@ if mode == "📄 Doc vs Doc":
         st.session_state["dvd_d1"] = d1
         st.session_state["dvd_d2"] = d2
         if st.button("▶ Run TF-IDF Analysis", type="primary", disabled=not (d1 and d2)):
-            st.session_state["dvd_run"]   = True
+            st.session_state["dvd_run"] = True
             st.session_state["dvd_sbert"] = None
+            st.session_state["dvd_active_tab"] = "📊 Analysis"
+            st.rerun()
         if not (d1 and d2):
             st.info("Provide both documents to begin.")
 
@@ -404,7 +412,14 @@ if mode == "📄 Doc vs Doc":
                 f"Final Score : {final*100:.2f}%\n"
                 f"Verdict     : {lbl}\n"
             )
-            st.download_button("⬇ Download Report", report, file_name="plagiarism_report.txt")
+            pdf_data = generate_pdf_report(report)
+
+            st.download_button(
+                "⬇ Download PDF Report",
+                pdf_data,
+                file_name="plagiarism_report.pdf",
+                mime="application/pdf"
+            )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -554,9 +569,22 @@ else:
                 f"  Link : {link}\n"
                 f"  Source: {r['source']}"
             )
-        st.download_button(
-            "⬇ Download Report",
-            "\n\n".join(report_lines),
-            file_name="ss_plagiarism_report.txt"
+        pdf_data = generate_pdf_report("\n\n".join(report_lines))
 
+        st.download_button(
+            "⬇ Download PDF Report",
+            pdf_data,
+            file_name="ss_plagiarism_report.pdf",
+            mime="application/pdf"
         )
+
+def generate_pdf_report(report_text: str):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+
+    for line in report_text.split("\n"):
+        pdf.cell(0, 10, txt=line, ln=True)
+
+    return pdf.output(dest="S").encode("latin-1")
+
