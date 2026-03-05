@@ -315,33 +315,56 @@ st.divider()
 # ══════════════════════════════════════════════════════════════════════════════
 # MODE 1: Doc vs Doc  (TF-IDF first → SBERT optional)
 # ══════════════════════════════════════════════════════════════════════════════
-if mode == "📄 Doc vs Doc":
-    if "dvd_active_tab" not in st.session_state:
-        st.session_state["dvd_active_tab"] = "📄 Input"
-    tab1, tab2, tab3 = st.tabs(
-        ["📄 Input", "📊 Analysis", "📋 Report"],
-        default=st.session_state["dvd_active_tab"]
-        )
 
-    with tab1:
+if mode == "📄 Doc vs Doc":
+
+    # ── Init session state ──
+    if "dvd_active_tab" not in st.session_state:
+        st.session_state["dvd_active_tab"] = "input"
+    if "dvd_run" not in st.session_state:
+        st.session_state["dvd_run"] = False
+
+    # ── Manual tab buttons ──
+    active = st.session_state["dvd_active_tab"]
+    t1, t2, t3 = st.columns(3)
+    with t1:
+        if st.button("📄 Input",    use_container_width=True,
+                     type="primary" if active == "input"    else "secondary"):
+            st.session_state["dvd_active_tab"] = "input";    st.rerun()
+    with t2:
+        if st.button("📊 Analysis", use_container_width=True,
+                     type="primary" if active == "analysis" else "secondary"):
+            st.session_state["dvd_active_tab"] = "analysis"; st.rerun()
+    with t3:
+        if st.button("📋 Report",   use_container_width=True,
+                     type="primary" if active == "report"   else "secondary"):
+            st.session_state["dvd_active_tab"] = "report";   st.rerun()
+    st.divider()
+
+    # ══ TAB: Input ════════════════════════════════════════════════════════════
+    if active == "input":
         col1, col2 = st.columns(2)
         d1 = doc_input_ui(col1, "Document 1", "d1")
         d2 = doc_input_ui(col2, "Document 2", "d2")
         st.session_state["dvd_d1"] = d1
         st.session_state["dvd_d2"] = d2
+
         if st.button("▶ Run TF-IDF Analysis", type="primary", disabled=not (d1 and d2)):
-            st.session_state["dvd_run"] = True
-            st.session_state["dvd_sbert"] = None
-            st.session_state["dvd_active_tab"] = "📊 Analysis"
+            st.session_state["dvd_run"]        = True
+            st.session_state["dvd_sbert"]      = None
+            st.session_state["dvd_active_tab"] = "analysis"  # ← redirect
             st.rerun()
+
         if not (d1 and d2):
             st.info("Provide both documents to begin.")
 
-    with tab2:
+    # ══ TAB: Analysis ═════════════════════════════════════════════════════════
+    elif active == "analysis":
         if not st.session_state.get("dvd_run"):
-            st.info("Complete Input tab and click **Run TF-IDF Analysis**.")
+            st.info("Complete the **Input** tab and click **Run TF-IDF Analysis**.")
         else:
-            d1, d2 = st.session_state["dvd_d1"], st.session_state["dvd_d2"]
+            d1 = st.session_state["dvd_d1"]
+            d2 = st.session_state["dvd_d2"]
             c1, c2 = clean(d1), clean(d2)
 
             with st.spinner("Running TF-IDF…"):
@@ -351,7 +374,8 @@ if mode == "📄 Doc vs Doc":
             st.subheader("TF-IDF Result")
             st.metric("TF-IDF Cosine Similarity", f"{tf*100:.1f}%")
             lbl, col = verdict(tf)
-            st.markdown(f"**Preliminary Verdict:** <span style='color:{col}'>{lbl}</span>", unsafe_allow_html=True)
+            st.markdown(f"**Preliminary Verdict:** <span style='color:{col}'>{lbl}</span>",
+                        unsafe_allow_html=True)
             st.divider()
 
             if st.checkbox("🔬 Run Deep Semantic Analysis (SBERT)", value=False):
@@ -372,10 +396,11 @@ if mode == "📄 Doc vs Doc":
                 final = weighted_score(tf, sb)
                 lbl, col = verdict(final)
                 m1, m2, m3 = st.columns(3)
-                m1.metric("TF-IDF",         f"{tf*100:.1f}%")
-                m2.metric("SBERT Semantic",  f"{sb*100:.1f}%")
-                m3.metric("Weighted Final",  f"{final*100:.2f}%")
-                st.markdown(f"**Final Verdict:** <span style='color:{col}'>{lbl}</span>", unsafe_allow_html=True)
+                m1.metric("TF-IDF",        f"{tf*100:.1f}%")
+                m2.metric("SBERT Semantic", f"{sb*100:.1f}%")
+                m3.metric("Weighted Final", f"{final*100:.2f}%")
+                st.markdown(f"**Final Verdict:** <span style='color:{col}'>{lbl}</span>",
+                            unsafe_allow_html=True)
 
                 chart_df = pd.DataFrame(
                     {"Score (%)": [tf*100, sb*100]},
@@ -384,10 +409,13 @@ if mode == "📄 Doc vs Doc":
                 st.bar_chart(chart_df)
 
                 st.subheader("Top Matching Sentence Pairs")
-                for s1, s2, sc in top_sentence_pairs(sents1[:50], embs1[:50], sents2[:50], embs2[:50]):
+                for s1, s2, sc in top_sentence_pairs(
+                    sents1[:50], embs1[:50], sents2[:50], embs2[:50]
+                ):
                     sentence_pair_card(s1, s2, sc)
 
-    with tab3:
+    # ══ TAB: Report ═══════════════════════════════════════════════════════════
+    elif active == "report":
         tf = st.session_state.get("dvd_tfidf")
         sb = st.session_state.get("dvd_sbert")
         d1 = st.session_state.get("dvd_d1", "")
@@ -426,15 +454,12 @@ if mode == "📄 Doc vs Doc":
                 f"Verdict     : {lbl}\n"
             )
             pdf_data = generate_pdf_report(report)
-
             st.download_button(
                 "⬇ Download PDF Report",
                 pdf_data,
                 file_name="plagiarism_report.pdf",
-                mime="application/pdf"
+                mime="application/pdf",
             )
-
-
 # ══════════════════════════════════════════════════════════════════════════════
 # MODE 2: Doc vs Semantic Scholar  (Groq keywords → SS fetch → SBERT only)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -530,7 +555,18 @@ else:
                 "SBERT (%)":  round(r["sbert"] * 100, 2),
                 "Link":       get_paper_url(paper),
             })
-        st.dataframe(pd.DataFrame(summary_rows), use_container_width=True)
+        st.data_editor(
+            pd.DataFrame(summary_rows),
+            column_config={
+                "Link": st.column_config.LinkColumn(
+                    "Link",
+                    display_text="🔗 Open",
+                )
+            },
+            use_container_width=True,
+            hide_index=True,
+            disabled=True,
+        )
 
         # Bar chart
         chart_df = pd.DataFrame(
@@ -590,5 +626,6 @@ else:
             file_name="ss_plagiarism_report.pdf",
             mime="application/pdf"
         )
+
 
 
