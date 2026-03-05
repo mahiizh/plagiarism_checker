@@ -267,6 +267,15 @@ def sentence_pair_card(s1: str, s2: str, sc: float):
         unsafe_allow_html=True,
     )
 
+def generate_pdf_report(report_text: str):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+
+    for line in report_text.split("\n"):
+        pdf.cell(0, 10, txt=line, ln=True)
+
+    return pdf.output(dest="S").encode("latin-1")
 
 def doc_input_ui(col, label: str, kp: str) -> str:
     with col:
@@ -577,14 +586,4 @@ else:
             file_name="ss_plagiarism_report.pdf",
             mime="application/pdf"
         )
-
-def generate_pdf_report(report_text: str):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", size=12)
-
-    for line in report_text.split("\n"):
-        pdf.cell(0, 10, txt=line, ln=True)
-
-    return pdf.output(dest="S").encode("latin-1")
 
