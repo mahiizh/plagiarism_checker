@@ -79,7 +79,11 @@ def extract_keywords_groq(text: str) -> str:
         raw = resp.choices[0].message.content.strip()
         # clean up and join as search query
         keywords = [k.strip().strip("\"'") for k in raw.split(",") if k.strip()]
-        return " ".join(keywords[:10])
+
+        query_keywords = " ".join(keywords[:10])     # used for Semantic Scholar query
+        display_keywords = ", ".join(keywords[:10])  # shown nicely in UI
+        
+        return query_keywords, display_keywords
     except Exception as e:
         st.warning(f"Groq keyword extraction failed: {e}. Falling back to first 50 words.")
         words = [w for w in clean(body).split() if len(w) > 4]
@@ -424,18 +428,18 @@ else:
 
     if query_text:
         with st.spinner("Extracting keywords via Groq…"):
-            kw = extract_keywords_groq(query_text)
-        st.info(f"🔑 Keywords: **{kw}**")
+            query_kw, display_kw = extract_keywords_groq(query_text)
+        st.info(f"🔑 Keywords: **{display_kw}**")
 
     if st.button("▶ Run Analysis", type="primary", disabled=not query_text):
 
         # ── Step 1: keywords ──
         with st.spinner("Extracting keywords via Groq…"):
-            kw = extract_keywords_groq(query_text)
+            query_kw, display_kw = extract_keywords_groq(query_text)
 
         # ── Step 2: fetch papers ──
-        with st.spinner(f"Querying Semantic Scholar for: *{kw}*…"):
-            papers = fetch_papers(kw)
+        with st.spinner(f"Querying Semantic Scholar for: *{query_kw}*…"):
+            papers = fetch_papers(query_kw)
 
         if not papers:
             st.error("No papers returned. Check your connection or API key.")
@@ -554,4 +558,5 @@ else:
             "⬇ Download Report",
             "\n\n".join(report_lines),
             file_name="ss_plagiarism_report.txt"
+
         )
