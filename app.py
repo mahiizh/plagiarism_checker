@@ -11,7 +11,6 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
 from fpdf import FPDF
-import re
 
 # ── Config ────────────────────────────────────────────────────────────────────
 SBERT_MODEL   = "all-MiniLM-L6-v2"
@@ -48,7 +47,6 @@ def split_sentences(text: str) -> list[str]:
 
 
 def extract_body_text(text: str) -> str:
-    """Skip header (authors/institution) and references tail."""
     words = text.split()
     if len(words) > 600:
         words = words[300:-200]
@@ -58,8 +56,7 @@ def extract_body_text(text: str) -> str:
 
 
 # ── Groq keyword extraction ───────────────────────────────────────────────────
-def extract_keywords_groq(text: str) -> str:
-    """Use Groq LLM to extract meaningful academic topic keywords."""
+def extract_keywords_groq(text: str) -> tuple[str, str]:
     body = extract_body_text(text)
     body = re.sub(r"\b[A-Z][a-z]*(?:\s+[A-Z][a-z]*)+\b", "", body)
     body = re.sub(r"\s+", " ", body).strip()
@@ -79,22 +76,18 @@ def extract_keywords_groq(text: str) -> str:
             max_tokens=100,
         )
         raw = resp.choices[0].message.content.strip()
-        # clean up and join as search query
         keywords = [k.strip().strip("\"'") for k in raw.split(",") if k.strip()]
-
-        query_keywords = " ".join(keywords[:10])     # used for Semantic Scholar query
-        display_keywords = ", ".join(keywords[:10])  # shown nicely in UI
-        
+        query_keywords   = " ".join(keywords[:10])
+        display_keywords = ", ".join(keywords[:10])
         return query_keywords, display_keywords
     except Exception as e:
         st.warning(f"Groq keyword extraction failed: {e}. Falling back to first 50 words.")
         words = [w for w in clean(body).split() if len(w) > 4]
-        return " ".join(words[:8])
+        return " ".join(words[:8]), " ".join(words[:8])
 
 
 # ── Semantic Scholar ──────────────────────────────────────────────────────────
 def fetch_papers(query: str) -> list[dict]:
-    """Query Semantic Scholar with API key, retry on 429."""
     for attempt in range(3):
         try:
             resp = requests.get(
@@ -118,7 +111,6 @@ def fetch_papers(query: str) -> list[dict]:
 
 
 def fetch_full_text(pdf_url: str) -> str:
-    """Download and extract text from an OA PDF."""
     try:
         resp = requests.get(pdf_url, timeout=15)
         resp.raise_for_status()
@@ -129,12 +121,11 @@ def fetch_full_text(pdf_url: str) -> str:
 
 
 def get_paper_text(paper: dict) -> tuple[str, str]:
-    """Returns (text, source_label). Full OA text if available, else abstract."""
-    oa     = paper.get("openAccessPdf") or {}
+    oa      = paper.get("openAccessPdf") or {}
     pdf_url = oa.get("url", "")
     abstract = paper.get("abstract") or ""
     if pdf_url:
-        time.sleep(1)  # respect 1 req/sec rate limit
+        time.sleep(1)
         full_text = fetch_full_text(pdf_url)
         if full_text.strip():
             return full_text, "full text"
@@ -142,7 +133,6 @@ def get_paper_text(paper: dict) -> tuple[str, str]:
 
 
 def get_paper_url(paper: dict) -> str:
-    """Return the Semantic Scholar landing page URL for a paper."""
     return paper.get("url") or ""
 
 
@@ -186,13 +176,13 @@ def weighted_score(tf: float, sb: float) -> float:
 
 def verdict(score: float) -> tuple[str, str]:
     if score >= 0.85:
-        return "🔴 High Plagiarism", "red"
+        return "High Plagiarism", "red"
     elif score >= 0.60:
-        return "🟠 Moderate Similarity", "orange"
+        return "Moderate Similarity", "orange"
     elif score >= 0.35:
-        return "🟡 Low Similarity", "goldenrod"
+        return "Low Similarity", "goldenrod"
     else:
-        return "🟢 Likely Original", "green"
+        return "Likely Original", "green"
 
 
 # ── UI helpers ────────────────────────────────────────────────────────────────
@@ -205,28 +195,21 @@ def scrollable_html(content: str) -> str:
 
 
 def get_important_words(t1: str, t2: str, threshold: float = 0.1) -> set[str]:
-    """
-    Use TF-IDF to find words that are actually meaningful.
-    Returns words whose TF-IDF score exceeds the threshold in either document.
-    Stop words and common words naturally get low scores and are excluded.
-    """
     try:
         vec = TfidfVectorizer(stop_words="english", token_pattern=r"(?u)\b\w+\b")
         tfidf_matrix = vec.fit_transform([t1, t2])
         terms = vec.get_feature_names_out()
         scores_d1 = tfidf_matrix[0].toarray()[0]
         scores_d2 = tfidf_matrix[1].toarray()[0]
-        important = {
+        return {
             term for i, term in enumerate(terms)
             if scores_d1[i] > threshold or scores_d2[i] > threshold
         }
-        return important
     except Exception:
         return set()
 
 
 def diff_highlight(t1: str, t2: str) -> tuple[str, str]:
-    """Highlight only TF-IDF important matching words."""
     important_words = get_important_words(t1, t2)
     words1 = t1.split()
     words2 = t2.split()
@@ -258,8 +241,8 @@ def diff_highlight(t1: str, t2: str) -> tuple[str, str]:
 
 
 def sentence_pair_card(s1: str, s2: str, sc: float):
-    bg      = "#ffe5e5" if sc > 0.8 else "#fff7e5" if sc > 0.5 else "#f0f0f0"
-    font    = "#7b0000" if sc > 0.8 else "#7a4f00" if sc > 0.5 else "#333"
+    bg   = "#ffe5e5" if sc > 0.8 else "#fff7e5" if sc > 0.5 else "#f0f0f0"
+    font = "#7b0000" if sc > 0.8 else "#7a4f00" if sc > 0.5 else "#333"
     st.markdown(
         f'<div style="background:{bg};color:{font};padding:10px;border-radius:6px;margin-bottom:8px">'
         f'<b>Match: {sc*100:.1f}%</b><br>'
@@ -268,18 +251,16 @@ def sentence_pair_card(s1: str, s2: str, sc: float):
         unsafe_allow_html=True,
     )
 
-def generate_pdf_report(report_text: str):
-    # remove emojis / non latin characters
-    report_text = re.sub(r'[^\x00-\x7F]+', '', report_text)
 
+def generate_pdf_report(report_text: str):
+    report_text = re.sub(r'[^\x00-\x7F]+', '', report_text)
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", size=12)
-
+    pdf.set_font("Arial", size=11)
     for line in report_text.split("\n"):
-        pdf.cell(0, 10, txt=line, ln=True)
-
+        pdf.cell(0, 8, txt=line, ln=True)
     return pdf.output(dest="S").encode("latin-1")
+
 
 def doc_input_ui(col, label: str, kp: str) -> str:
     with col:
@@ -313,18 +294,15 @@ st.divider()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# MODE 1: Doc vs Doc  (TF-IDF first → SBERT optional)
+# MODE 1: Doc vs Doc
 # ══════════════════════════════════════════════════════════════════════════════
-
 if mode == "📄 Doc vs Doc":
 
-    # ── Init session state ──
     if "dvd_active_tab" not in st.session_state:
         st.session_state["dvd_active_tab"] = "input"
     if "dvd_run" not in st.session_state:
         st.session_state["dvd_run"] = False
 
-    # ── Manual tab buttons ──
     active = st.session_state["dvd_active_tab"]
     t1, t2, t3 = st.columns(3)
     with t1:
@@ -341,7 +319,7 @@ if mode == "📄 Doc vs Doc":
             st.session_state["dvd_active_tab"] = "report";   st.rerun()
     st.divider()
 
-    # ══ TAB: Input ════════════════════════════════════════════════════════════
+    # ── Input ─────────────────────────────────────────────────────────────────
     if active == "input":
         col1, col2 = st.columns(2)
         d1 = doc_input_ui(col1, "Document 1", "d1")
@@ -352,13 +330,13 @@ if mode == "📄 Doc vs Doc":
         if st.button("▶ Run TF-IDF Analysis", type="primary", disabled=not (d1 and d2)):
             st.session_state["dvd_run"]        = True
             st.session_state["dvd_sbert"]      = None
-            st.session_state["dvd_active_tab"] = "analysis"  # ← redirect
+            st.session_state["dvd_active_tab"] = "analysis"
             st.rerun()
 
         if not (d1 and d2):
             st.info("Provide both documents to begin.")
 
-    # ══ TAB: Analysis ═════════════════════════════════════════════════════════
+    # ── Analysis ──────────────────────────────────────────────────────────────
     elif active == "analysis":
         if not st.session_state.get("dvd_run"):
             st.info("Complete the **Input** tab and click **Run TF-IDF Analysis**.")
@@ -414,12 +392,16 @@ if mode == "📄 Doc vs Doc":
                 ):
                     sentence_pair_card(s1, s2, sc)
 
-    # ══ TAB: Report ═══════════════════════════════════════════════════════════
+    # ── Report ────────────────────────────────────────────────────────────────
     elif active == "report":
-        tf = st.session_state.get("dvd_tfidf")
-        sb = st.session_state.get("dvd_sbert")
-        d1 = st.session_state.get("dvd_d1", "")
-        d2 = st.session_state.get("dvd_d2", "")
+        tf     = st.session_state.get("dvd_tfidf")
+        sb     = st.session_state.get("dvd_sbert")
+        d1     = st.session_state.get("dvd_d1", "")
+        d2     = st.session_state.get("dvd_d2", "")
+        sents1 = st.session_state.get("dvd_sents1", [])
+        sents2 = st.session_state.get("dvd_sents2", [])
+        embs1  = st.session_state.get("dvd_embs1", np.array([]))
+        embs2  = st.session_state.get("dvd_embs2", np.array([]))
 
         if tf is None:
             st.info("Run analysis first.")
@@ -446,22 +428,44 @@ if mode == "📄 Doc vs Doc":
                     st.markdown("**Document 2**")
                     st.markdown(scrollable_html(h2), unsafe_allow_html=True)
 
-            report = (
-                f"PLAGIARISM REPORT\n{'='*30}\n"
-                f"TF-IDF      : {tf*100:.2f}%\n"
-                f"SBERT       : {f'{sb*100:.2f}%' if sb else 'Not run'}\n"
-                f"Final Score : {final*100:.2f}%\n"
-                f"Verdict     : {lbl}\n"
-            )
-            pdf_data = generate_pdf_report(report)
+            # ── Build PDF report ──────────────────────────────────────────────
+            report_lines = [
+                "PLAGIARISM REPORT",
+                "=" * 50,
+                f"TF-IDF Cosine  : {tf*100:.2f}%",
+                f"SBERT Semantic : {f'{sb*100:.2f}%' if sb else 'Not run'}",
+                f"Final Score    : {final*100:.2f}%",
+                f"Verdict        : {lbl}",
+            ]
+
+            if sb is not None and sents1 and sents2 and embs1.size > 0 and embs2.size > 0:
+                pairs = top_sentence_pairs(sents1[:50], embs1[:50], sents2[:50], embs2[:50])
+                if pairs:
+                    report_lines += [
+                        "",
+                        "-" * 50,
+                        "TOP MATCHING SENTENCE PAIRS",
+                        "-" * 50,
+                    ]
+                    for idx, (s1, s2, sc) in enumerate(pairs, 1):
+                        report_lines += [
+                            "",
+                            f"Pair {idx}  -  Match: {sc*100:.1f}%",
+                            f"  Doc 1 : {s1}",
+                            f"  Doc 2 : {s2}",
+                        ]
+
+            pdf_data = generate_pdf_report("\n".join(report_lines))
             st.download_button(
                 "⬇ Download PDF Report",
                 pdf_data,
                 file_name="plagiarism_report.pdf",
                 mime="application/pdf",
             )
+
+
 # ══════════════════════════════════════════════════════════════════════════════
-# MODE 2: Doc vs Semantic Scholar  (Groq keywords → SS fetch → SBERT only)
+# MODE 2: Doc vs Semantic Scholar
 # ══════════════════════════════════════════════════════════════════════════════
 else:
     st.subheader("🌐 Doc vs Semantic Scholar")
@@ -482,36 +486,32 @@ else:
     if query_text:
         with st.spinner("Extracting keywords via Groq…"):
             query_kw, display_kw = extract_keywords_groq(query_text)
-        st.info(f"🔑 Keywords: **{display_kw}**")
+        st.info(f"Keywords: {display_kw}")
 
     if st.button("▶ Run Analysis", type="primary", disabled=not query_text):
 
-        # ── Step 1: keywords ──
         with st.spinner("Extracting keywords via Groq…"):
             query_kw, display_kw = extract_keywords_groq(query_text)
 
-        # ── Step 2: fetch papers ──
-        with st.spinner(f"Querying Semantic Scholar for: *{query_kw}*…"):
+        with st.spinner(f"Querying Semantic Scholar for: {query_kw}…"):
             papers = fetch_papers(query_kw)
 
         if not papers:
             st.error("No papers returned. Check your connection or API key.")
             st.stop()
 
-        st.success(f"✅ Fetched {len(papers)} papers from Semantic Scholar.")
+        st.success(f"Fetched {len(papers)} papers from Semantic Scholar.")
 
-        # ── Step 3: encode query doc ──
         with st.spinner("Encoding your document…"):
             q_clean   = clean(query_text)
             q_sents   = split_sentences(query_text)
             q_embs    = model.encode(q_sents, convert_to_numpy=True) if q_sents else np.array([])
             q_doc_emb = model.encode([q_clean], convert_to_numpy=True)[0]
 
-        # ── Step 4: SBERT vs each paper ──
         results = []
         prog = st.progress(0, text="Fetching and analyzing papers…")
         for i, paper in enumerate(papers):
-            text, source = get_paper_text(paper)   # sleep(1) inside for rate limit
+            text, source = get_paper_text(paper)
             if text.strip():
                 p_clean   = clean(text)
                 p_sents   = split_sentences(text)
@@ -533,13 +533,12 @@ else:
         results.sort(key=lambda x: -x["sbert"])
         st.session_state["ss_results"] = results
 
-    # ── Display results ──
+    # ── Display results ───────────────────────────────────────────────────────
     if st.session_state.get("ss_results"):
         results = st.session_state["ss_results"]
 
         st.subheader("📊 Results — Ranked by SBERT Similarity")
 
-        # Summary table with clickable links
         summary_rows = []
         for r in results:
             paper   = r["paper"]
@@ -549,33 +548,29 @@ else:
                 for a in authors[:3]
             )
             summary_rows.append({
-                "Paper":      paper.get("title", "Unknown")[:55],
-                "Year":       paper.get("year", "N/A"),
-                "Authors":    author_names,
-                "SBERT (%)":  round(r["sbert"] * 100, 2),
-                "Link":       get_paper_url(paper),
+                "Paper":     paper.get("title", "Unknown")[:55],
+                "Year":      paper.get("year", "N/A"),
+                "Authors":   author_names,
+                "SBERT (%)": round(r["sbert"] * 100, 2),
+                "Link":      get_paper_url(paper),
             })
+
         st.data_editor(
             pd.DataFrame(summary_rows),
             column_config={
-                "Link": st.column_config.LinkColumn(
-                    "Link",
-                    display_text="🔗 Open",
-                )
+                "Link": st.column_config.LinkColumn("Link", display_text="🔗 Open")
             },
             use_container_width=True,
             hide_index=True,
             disabled=True,
         )
 
-        # Bar chart
         chart_df = pd.DataFrame(
             {"SBERT Similarity (%)": [r["sbert"]*100 for r in results]},
             index=[r["paper"].get("title", "")[:45] for r in results]
         )
         st.bar_chart(chart_df)
 
-        # Per paper expander
         for r in results:
             paper      = r["paper"]
             lbl, color = verdict(r["sbert"])
@@ -607,25 +602,40 @@ else:
                     for s1, s2, sc in r["pairs"]:
                         sentence_pair_card(s1, s2, sc)
 
-        # Download report
-        report_lines = ["SEMANTIC SCHOLAR PLAGIARISM REPORT", "=" * 50]
+        # ── Build PDF report ──────────────────────────────────────────────────
+        report_lines = [
+            "SEMANTIC SCHOLAR PLAGIARISM REPORT",
+            "=" * 50,
+            "",
+        ]
         for r in results:
-            lbl, _  = verdict(r["sbert"])
-            title   = r["paper"].get("title", "Unknown")[:50]
-            link    = get_paper_url(r["paper"])
-            report_lines.append(
-                f"{title:<52} SBERT: {r['sbert']*100:.1f}%  {lbl}\n"
-                f"  Link : {link}\n"
-                f"  Source: {r['source']}"
-            )
-        pdf_data = generate_pdf_report("\n\n".join(report_lines))
+            lbl, _ = verdict(r["sbert"])
+            title  = r["paper"].get("title", "Unknown")
+            link   = get_paper_url(r["paper"])
 
+            report_lines += [
+                f"Paper  : {title}",
+                f"SBERT  : {r['sbert']*100:.1f}%  |  {lbl}",
+                f"Source : {r['source']}",
+                f"Link   : {link}",
+            ]
+
+            if r["pairs"]:
+                report_lines.append("  Top Matching Sentence Pairs:")
+                for idx, (s1, s2, sc) in enumerate(r["pairs"], 1):
+                    report_lines += [
+                        "",
+                        f"  Pair {idx}  -  Match: {sc*100:.1f}%",
+                        f"    Your doc : {s1}",
+                        f"    Paper    : {s2}",
+                    ]
+
+            report_lines.append("-" * 50)
+
+        pdf_data = generate_pdf_report("\n".join(report_lines))
         st.download_button(
             "⬇ Download PDF Report",
             pdf_data,
             file_name="ss_plagiarism_report.pdf",
-            mime="application/pdf"
+            mime="application/pdf",
         )
-
-
-
