@@ -11,6 +11,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sentence_transformers import SentenceTransformer
 from fpdf import FPDF
+import re
 
 # ── Config ────────────────────────────────────────────────────────────────────
 SBERT_MODEL   = "all-MiniLM-L6-v2"
@@ -268,6 +269,9 @@ def sentence_pair_card(s1: str, s2: str, sc: float):
     )
 
 def generate_pdf_report(report_text: str):
+    # remove emojis / non latin characters
+    report_text = re.sub(r'[^\x00-\x7F]+', '', report_text)
+
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Arial", size=12)
@@ -586,4 +590,5 @@ else:
             file_name="ss_plagiarism_report.pdf",
             mime="application/pdf"
         )
+
 
