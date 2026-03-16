@@ -14,7 +14,7 @@ from fpdf import FPDF
 
 # ── Config ────────────────────────────────────────────────────────────────────
 SBERT_MODEL   = "all-MiniLM-L6-v2"
-GROQ_API_KEY  = "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"
+GROQ_API_KEY  = "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"
 SS_API_KEY    = "fdAZIOcioA2M8gg5OM4cs6597lJZ0PUu95AeCEr9"
 SS_SEARCH_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
 SS_FIELDS     = "title,abstract,authors,year,isOpenAccess,openAccessPdf,url"
